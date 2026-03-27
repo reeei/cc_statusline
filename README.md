@@ -1,22 +1,24 @@
 # Claude Code Statusline
 
-Claude Codeのカスタムstatusline設定。
+Claude Code のカスタム statusline 設定。
 
 ## 表示内容
 
 ```
-cc_work | main
-░░░░░░░░░░ 0% | Claude Opus 4.6
-5h:12%(3pm)  7d:5%(03/30 9am)
+sap-cc | main
+██░░░░░░░░ 23% | Opus 4.6
+5h:4%(8am/4h46m)  7d:9%(04/02 6pm/5d14h)
 ```
 
-- **1行目**: ワークスペース相対パス + Gitブランチ
+- **1行目**: ワークスペース相対パス + Git ブランチ
 - **2行目**: コンテキストウィンドウ使用率（プログレスバー） + モデル名
-- **3行目**: 5時間 / 7日間のレート制限使用率 + リセット時刻
+- **3行目**: レート制限使用率 + リセット時刻 + リセットまでの残り時間
 
 ## セットアップ
 
 ```bash
+git clone https://github.com/reeei/cc_statusline.git
+cd cc_statusline
 ./setup.sh
 ```
 
@@ -28,7 +30,16 @@ chmod +x ~/.claude/statusline-command.sh
 # settings.json の statusLine セクションを ~/.claude/settings.json にマージ
 ```
 
+セットアップ後、Claude Code を再起動してください。
+
 ## 前提条件
 
-- Python 3（JSON解析に使用）
-- bash環境（Windows: Git Bash / WSL）
+- **Node.js** (v18+)
+- **Git**
+- bash 環境（Windows: Git Bash / WSL）
+
+## 技術メモ
+
+- JSON 解析・日時フォーマットに Node.js を使用（Python 不要）
+- `resets_at` は Unix epoch seconds として処理（公式スキーマ準拠）
+- Windows (Git Bash) / macOS / Linux で動作確認済み

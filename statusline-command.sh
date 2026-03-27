@@ -1,136 +1,106 @@
 #!/usr/bin/env bash
-input=$(cat)
+cat | node -e "
+let buf = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', c => buf += c);
+process.stdin.on('end', () => {
+  try {
+    const d = JSON.parse(buf);
+    const get = (path) => {
+      let o = d;
+      for (const k of path.split('.')) {
+        if (o && typeof o === 'object') o = o[k];
+        else return null;
+      }
+      return o;
+    };
 
-# --- Parse JSON with Python (jq not available on this Windows env) ---
-parsed=$(echo "$input" | python -c "
-import sys, json
-d = json.load(sys.stdin)
-def get(path):
-    o = d
-    for k in path.split('.'):
-        if isinstance(o, dict):
-            o = o.get(k)
-        else:
-            return ''
-    return '' if o is None else str(o)
-fields = [
-    'workspace.current_dir',
-    'model.id',
-    'model.display_name',
-    'context_window.used_percentage',
-    'rate_limits.five_hour.used_percentage',
-    'rate_limits.five_hour.resets_at',
-    'rate_limits.seven_day.used_percentage',
-    'rate_limits.seven_day.resets_at',
-]
-for f in fields:
-    print(get(f))
-" 2>/dev/null)
+    // --- Path display ---
+    const cwd = get('workspace.current_dir') || '';
+    let displayPath = '';
+    if (cwd) {
+      const norm = cwd.replace(/\\\\/g, '/');
+      const base = (process.env.HOME || '').replace(/\\\\/g, '/') + '/.vscode/workspace';
+      if (norm.startsWith(base + '/')) {
+        displayPath = norm.slice(base.length + 1);
+      } else {
+        displayPath = norm.split('/').pop() || norm;
+      }
+    }
 
-# Read parsed values
-IFS=$'\n' read -r -d '' cwd model_id model_display used_pct five_pct five_reset seven_pct seven_reset <<< "$parsed"
+    // --- Git branch ---
+    let gitBranch = '';
+    if (cwd) {
+      try {
+        gitBranch = require('child_process')
+          .execSync('git rev-parse --abbrev-ref HEAD', { cwd, encoding: 'utf8', stdio: ['pipe','pipe','pipe'] })
+          .trim();
+      } catch(e) {}
+    }
 
-# --- Path display: show workspace-relative path ---
-display_path=""
-if [ -n "$cwd" ]; then
-  # Remove workspace base to get short path (e.g. "cc_work")
-  workspace_base="$HOME/.vscode/workspace"
-  # Normalize backslashes to forward slashes for Windows
-  normalized_cwd=$(echo "$cwd" | sed 's|\\|/|g')
-  normalized_base=$(echo "$workspace_base" | sed 's|\\|/|g')
-  display_path="${normalized_cwd#$normalized_base/}"
-  # If no change (not under workspace), show basename only
-  if [ "$display_path" = "$normalized_cwd" ]; then
-    display_path=$(basename "$normalized_cwd")
-  fi
-fi
+    // --- Model ---
+    const model = get('model.display_name') || get('model.id') || 'Unknown';
 
-# --- Git info ---
-git_branch=""
-if [ -n "$cwd" ]; then
-  git_branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
-fi
+    // --- Context window progress bar ---
+    const usedPct = Number(get('context_window.used_percentage')) || 0;
+    const filled = Math.round(usedPct / 10);
+    const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(10 - filled);
+    const contextStr = bar + ' ' + Math.round(usedPct) + '%';
 
-# --- Model ---
-model="${model_display:-$model_id}"
-[ -z "$model" ] && model="Unknown"
+    // --- Rate limits ---
+    const fivePct = get('rate_limits.five_hour.used_percentage');
+    const fiveReset = get('rate_limits.five_hour.resets_at');
+    const sevenPct = get('rate_limits.seven_day.used_percentage');
+    const sevenReset = get('rate_limits.seven_day.resets_at');
 
-# --- Context window progress bar (10 chars) ---
-context_str=""
-if [ -n "$used_pct" ] && [ "$used_pct" != "0" ]; then
-  filled=$(echo "$used_pct" | awk '{printf "%d", int($1/10 + 0.5)}')
-  bar=""
-  for i in $(seq 1 10); do
-    if [ "$i" -le "$filled" ]; then
-      bar="${bar}█"
-    else
-      bar="${bar}░"
-    fi
-  done
-  pct_int=$(echo "$used_pct" | awk '{printf "%d", $1 + 0.5}')
-  context_str="${bar} ${pct_int}%"
-else
-  context_str="░░░░░░░░░░ 0%"
-fi
+    let rateStr = '';
+    if (fivePct != null && sevenPct != null) {
+      const now = Date.now();
+      const fmtRemaining = (epochSec) => {
+        const diff = epochSec * 1000 - now;
+        if (diff <= 0) return '0m';
+        const h = Math.floor(diff / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        if (h > 24) { const dd = Math.floor(h / 24); return dd + 'd' + (h % 24) + 'h'; }
+        if (h > 0) return h + 'h' + m + 'm';
+        return m + 'm';
+      };
+      const fmtTime = (epochSec) => {
+        try {
+          if (epochSec == null) return '?';
+          const dt = new Date(epochSec * 1000);
+          if (isNaN(dt.getTime())) return '?';
+          let h = dt.getHours(), ampm = h >= 12 ? 'pm' : 'am';
+          h = h % 12 || 12;
+          return h + ampm + '/' + fmtRemaining(epochSec);
+        } catch(e) { return '?'; }
+      };
+      const fmtDateTime = (epochSec) => {
+        try {
+          if (epochSec == null) return '?';
+          const dt = new Date(epochSec * 1000);
+          if (isNaN(dt.getTime())) return '?';
+          const mm = String(dt.getMonth()+1).padStart(2,'0');
+          const dd = String(dt.getDate()).padStart(2,'0');
+          let h = dt.getHours(), ampm = h >= 12 ? 'pm' : 'am';
+          h = h % 12 || 12;
+          return mm + '/' + dd + ' ' + h + ampm + '/' + fmtRemaining(epochSec);
+        } catch(e) { return '?'; }
+      };
+      rateStr = '5h:' + Math.round(fivePct) + '%(' + fmtTime(fiveReset) + ')  7d:' + Math.round(sevenPct) + '%(' + fmtDateTime(sevenReset) + ')';
+    }
 
-# --- Rate limits ---
-rate_str=""
-if [ -n "$five_pct" ] && [ -n "$seven_pct" ]; then
-  # Format reset times using python
-  five_time=$(echo "$five_reset" | python -c "
-import sys
-from datetime import datetime
-try:
-    s = sys.stdin.read().strip()
-    dt = datetime.fromisoformat(s.replace('Z','+00:00'))
-    print(dt.strftime('%I%p').lstrip('0').lower())
-except:
-    print('?')
-" 2>/dev/null)
-  seven_time=$(echo "$seven_reset" | python -c "
-import sys
-from datetime import datetime
-try:
-    s = sys.stdin.read().strip()
-    dt = datetime.fromisoformat(s.replace('Z','+00:00'))
-    print(dt.strftime('%m/%d %I%p').lstrip('0').lower())
-except:
-    print('?')
-" 2>/dev/null)
-  five_int=$(echo "$five_pct" | awk '{printf "%d", $1 + 0.5}')
-  seven_int=$(echo "$seven_pct" | awk '{printf "%d", $1 + 0.5}')
-  rate_str="5h:${five_int}%(${five_time:-?})  7d:${seven_int}%(${seven_time:-?})"
-fi
+    // --- Build output ---
+    const lines = [];
+    let line1 = displayPath;
+    if (gitBranch) line1 = line1 ? line1 + ' | ' + gitBranch : gitBranch;
+    if (line1) lines.push(line1);
+    lines.push(contextStr + ' | ' + model);
+    if (rateStr) lines.push(rateStr);
 
-# --- Build output ---
-parts=()
-
-# Line 1: path + branch
-line1=""
-[ -n "$display_path" ] && line1="$display_path"
-if [ -n "$git_branch" ]; then
-  if [ -n "$line1" ]; then
-    line1="$line1 | $git_branch"
-  else
-    line1="$git_branch"
-  fi
-fi
-[ -n "$line1" ] && parts+=("$line1")
-
-# Line 2: context + model
-parts+=("$context_str | $model")
-
-# Line 3: rate limits
-[ -n "$rate_str" ] && parts+=("$rate_str")
-
-# Join with newlines
-output=""
-for p in "${parts[@]}"; do
-  if [ -z "$output" ]; then
-    output="$p"
-  else
-    output=$(printf "%s\n%s" "$output" "$p")
-  fi
-done
-
-printf "%s" "$output"
+    process.stdout.write(lines.join('\n'));
+  } catch(e) {
+    process.stdout.write('statusline error');
+  }
+});
+"

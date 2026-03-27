@@ -12,21 +12,13 @@ chmod +x "$CLAUDE_DIR/statusline-command.sh"
 
 # Merge statusLine config into settings.json
 if [ -f "$CLAUDE_DIR/settings.json" ]; then
-  # settings.json exists — merge statusLine key using Python
-  python3 -c "
-import json, sys
-
-with open('$CLAUDE_DIR/settings.json', 'r') as f:
-    existing = json.load(f)
-
-with open('$SCRIPT_DIR/settings.json', 'r') as f:
-    new_settings = json.load(f)
-
-existing['statusLine'] = new_settings['statusLine']
-
-with open('$CLAUDE_DIR/settings.json', 'w') as f:
-    json.dump(existing, f, indent=2)
-"
+  node -e "
+const fs = require('fs');
+const existing = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+const newSettings = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+existing.statusLine = newSettings.statusLine;
+fs.writeFileSync(process.argv[1], JSON.stringify(existing, null, 2) + '\n');
+" "$CLAUDE_DIR/settings.json" "$SCRIPT_DIR/settings.json"
   echo "Updated statusLine in existing ~/.claude/settings.json"
 else
   cp "$SCRIPT_DIR/settings.json" "$CLAUDE_DIR/settings.json"

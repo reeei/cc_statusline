@@ -102,7 +102,7 @@ process.stdin.on('end', () => {
     if (rateStr) lines.push(rateStr);
 
     process.stdout.write(lines.join('\n'));
-  } catch(e) {\
+  } catch(e) {
     process.stdout.write('statusline error');
   }
 });

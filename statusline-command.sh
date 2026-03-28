@@ -54,7 +54,7 @@ process.stdin.on('end', () => {
     const sevenReset = get('rate_limits.seven_day.resets_at');
 
     let rateStr = '';
-    if (fivePct != null && sevenPct != null) {
+    if (fivePct != null || sevenPct != null) {
       const now = Date.now();
       const fmtRemaining = (epochSec) => {
         const diff = epochSec * 1000 - now;
@@ -87,7 +87,10 @@ process.stdin.on('end', () => {
           return mm + '/' + dd + ' ' + h + ampm + '/' + fmtRemaining(epochSec);
         } catch(e) { return '?'; }
       };
-      rateStr = '5h:' + Math.round(fivePct) + '%(' + fmtTime(fiveReset) + ')  7d:' + Math.round(sevenPct) + '%(' + fmtDateTime(sevenReset) + ')';
+      const parts = [];
+      if (fivePct != null) parts.push('5h:' + Math.round(fivePct) + '%(' + fmtTime(fiveReset) + ')');
+      if (sevenPct != null) parts.push('7d:' + Math.round(sevenPct) + '%(' + fmtDateTime(sevenReset) + ')');
+      rateStr = parts.join('  ');
     }
 
     // --- Build output ---
@@ -99,7 +102,7 @@ process.stdin.on('end', () => {
     if (rateStr) lines.push(rateStr);
 
     process.stdout.write(lines.join('\n'));
-  } catch(e) {
+  } catch(e) {\
     process.stdout.write('statusline error');
   }
 });
